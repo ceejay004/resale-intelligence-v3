@@ -27,7 +27,7 @@ export default async function handler(req, res) {
     const token = await getToken();
 
     const r = await fetch(
-      `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(item)}&filter=soldItems:true&limit=25`,
+      `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(item)}&limit=50&sort=-price`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -38,18 +38,28 @@ export default async function handler(req, res) {
 
     const data = await r.json();
 
-    if (!data.itemSummaries || data.itemSummaries.length === 0)
-      return res.json({ error: "No sold listings found" });
+    if (!data.itemSummaries)
+      return res.json({ error: "No results" });
 
+    // take only items with a price
     const prices = data.itemSummaries
-      .map(i => parseFloat(i.price.value))
-      .filter(p => !isNaN(p));
+      .map(i => i.price?.value)
+      .filter(v => v !== undefined)
+      .map(Number)
+      .filter(p => p > 3 && p < 5000);
 
-    const avg = prices.reduce((a,b)=>a+b,0)/prices.length;
+    if (prices.length === 0)
+      return res.json({ error: "No price data" });
+
+    // remove top & bottom outliers
+    prices.sort((a,b)=>a-b);
+    const trimmed = prices.slice(2, prices.length-2);
+
+    const avg = trimmed.reduce((a,b)=>a+b,0)/trimmed.length;
 
     res.json({
       average: avg.toFixed(2),
-      samples: prices.length
+      samples: trimmed.length
     });
 
   } catch (err) {
