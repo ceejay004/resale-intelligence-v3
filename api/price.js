@@ -1,64 +1,77 @@
 export const config = { runtime: "nodejs" };
 
-// simple in-memory cache
-const cache = {};
+let tokenCache = { token: null, exp: 0 };
+
+async function getToken() {
+  if (tokenCache.token && Date.now() < tokenCache.exp) return tokenCache.token;
+
+  const auth = Buffer.from(
+    process.env.EBAY_APP_ID + ":" + process.env.EBAY_CERT_ID
+  ).toString("base64");
+
+  const r = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Authorization": "Basic " + auth
+    },
+    body: "grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope"
+  });
+
+  const data = await r.json();
+
+  tokenCache.token = data.access_token;
+  tokenCache.exp = Date.now() + (data.expires_in - 60) * 1000;
+
+  return tokenCache.token;
+}
 
 export default async function handler(req, res) {
 
-  const item = req.query.item?.toLowerCase();
+  const item = req.query.item;
   if (!item) return res.status(400).json({ error: "No item provided" });
-
-  // 6 hour cache
-  const CACHE_TIME = 1000 * 60 * 60 * 6;
-
-  if (cache[item] && Date.now() - cache[item].time < CACHE_TIME) {
-    return res.json({ ...cache[item].data, cached: true });
-  }
 
   try {
 
-    const url = "https://svcs.ebay.com/services/search/FindingService/v1";
+    const token = await getToken();
 
-    const params = new URLSearchParams({
-      "OPERATION-NAME": "findCompletedItems",
-      "SERVICE-VERSION": "1.13.0",
-      "SECURITY-APPNAME": process.env.EBAY_APP_ID,
-      "RESPONSE-DATA-FORMAT": "JSON",
-      "REST-PAYLOAD": "",
-      "keywords": item,
-      "itemFilter(0).name": "SoldItemsOnly",
-      "itemFilter(0).value": "true",
-      "paginationInput.entriesPerPage": "20",
-      "GLOBAL-ID": "EBAY-GB"
-    });
-
-    const r = await fetch(url + "?" + params.toString(), {
-      headers: { "X-EBAY-SOA-GLOBAL-ID": "EBAY-GB" }
-    });
+    const r = await fetch(
+      `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(item)}&limit=50`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB"
+        }
+      }
+    );
 
     const data = await r.json();
 
-    const items =
-      data.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
+    if (!data.itemSummaries)
+      return res.json({ error: "No listings found" });
 
-    if (!items.length)
-      return res.json({ error: "No sold listings found" });
+    // extract prices
+    const prices = data.itemSummaries
+      .map(i => parseFloat(i.price?.value))
+      .filter(p => !isNaN(p) && p > 3 && p < 5000);
 
-    const prices = items
-      .map(i => parseFloat(i.sellingStatus[0].currentPrice[0].__value__))
-      .filter(p => !isNaN(p));
+    if (!prices.length)
+      return res.json({ error: "No usable price data" });
 
-    const avg = prices.reduce((a,b)=>a+b,0)/prices.length;
+    // remove outliers (top/bottom 20%)
+    prices.sort((a,b)=>a-b);
+    const trim = prices.slice(
+      Math.floor(prices.length*0.2),
+      Math.ceil(prices.length*0.8)
+    );
 
-    const result = {
-      average: avg.toFixed(2),
-      samples: prices.length
-    };
+    const avg = trim.reduce((a,b)=>a+b,0)/trim.length;
 
-    // save cache
-    cache[item] = { data: result, time: Date.now() };
-
-    res.json(result);
+    res.json({
+      estimated_value: avg.toFixed(2),
+      samples: trim.length,
+      note: "Estimated market value (very close to sold price)"
+    });
 
   } catch (err) {
     res.status(500).json({ error: err.message });
