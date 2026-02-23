@@ -20,27 +20,26 @@ async function getToken() {
 
 export default async function handler(req, res) {
   const item = req.query.item;
-  if (!item) return res.status(400).json({ error: "No item" });
+  if (!item) return res.status(400).json({ error: "No item provided" });
 
   try {
 
     const token = await getToken();
 
-    const search = await fetch(
-      `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(item)}&filter=soldItems:true&limit=20`,
+    const r = await fetch(
+      `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(item)}&filter=soldItems:true&limit=25`,
       {
         headers: {
-          Authorization: "Bearer " + token,
+          Authorization: `Bearer ${token}`,
           "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB"
         }
       }
     );
 
-    const data = await search.json();
+    const data = await r.json();
 
-    if (!data.itemSummaries || data.itemSummaries.length === 0) {
+    if (!data.itemSummaries || data.itemSummaries.length === 0)
       return res.json({ error: "No sold listings found" });
-    }
 
     const prices = data.itemSummaries
       .map(i => parseFloat(i.price.value))
@@ -50,7 +49,7 @@ export default async function handler(req, res) {
 
     res.json({
       average: avg.toFixed(2),
-      count: prices.length
+      samples: prices.length
     });
 
   } catch (err) {
