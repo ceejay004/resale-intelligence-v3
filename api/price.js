@@ -27,15 +27,18 @@ export default async function handler(req, res) {
     const token = await getToken();
 
     const search = await fetch(
-      `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(item)}&filter=soldItems:true&limit=25`,
+      `https://api.ebay.com/buy/browse/v1/item_summary/search?q=${encodeURIComponent(item)}&filter=soldItems:true&limit=20`,
       {
-        headers: { Authorization: "Bearer " + token }
+        headers: {
+          Authorization: "Bearer " + token,
+          "X-EBAY-C-MARKETPLACE-ID": "EBAY_GB"
+        }
       }
     );
 
     const data = await search.json();
 
-    if (!data.itemSummaries) {
+    if (!data.itemSummaries || data.itemSummaries.length === 0) {
       return res.json({ error: "No sold listings found" });
     }
 
@@ -51,6 +54,6 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    res.status(500).json({ error: "Pricing failed", details: err.message });
+    res.status(500).json({ error: err.message });
   }
 }
