@@ -1,4 +1,5 @@
 {
   "name": "resale-intelligence-v3",
-  "private": true
+  "private": true,
+  "type": "module"
 }
