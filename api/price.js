@@ -7,27 +7,34 @@ export default async function handler(req, res) {
 
   try {
 
-    const url =
-      "https://svcs.ebay.com/services/search/FindingService/v1" +
-      "?OPERATION-NAME=findCompletedItems" +
-      "&SERVICE-VERSION=1.13.0" +
-      "&SECURITY-APPNAME=" + process.env.EBAY_APP_ID +
-      "&RESPONSE-DATA-FORMAT=JSON" +
-      "&REST-PAYLOAD" +
-      "&keywords=" + encodeURIComponent(item) +
-      "&itemFilter(0).name=SoldItemsOnly" +
-      "&itemFilter(0).value=true" +
-      "&paginationInput.entriesPerPage=20" +
-      "&GLOBAL-ID=EBAY-GB";
+    const url = "https://svcs.ebay.com/services/search/FindingService/v1";
 
-    const r = await fetch(url);
+    const params = new URLSearchParams({
+      "OPERATION-NAME": "findCompletedItems",
+      "SERVICE-VERSION": "1.13.0",
+      "SECURITY-APPNAME": process.env.EBAY_APP_ID,
+      "RESPONSE-DATA-FORMAT": "JSON",
+      "REST-PAYLOAD": "",
+      "keywords": item,
+      "itemFilter(0).name": "SoldItemsOnly",
+      "itemFilter(0).value": "true",
+      "paginationInput.entriesPerPage": "25",
+      "GLOBAL-ID": "EBAY-GB"
+    });
+
+    const r = await fetch(url + "?" + params.toString(), {
+      headers: {
+        "X-EBAY-SOA-GLOBAL-ID": "EBAY-GB"
+      }
+    });
+
     const data = await r.json();
 
     const items =
       data.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
 
-    if (items.length === 0)
-      return res.json({ error: "No sold listings found" });
+    if (!items.length)
+      return res.json({ error: "No sold listings found", debug: data });
 
     const prices = items
       .map(i => parseFloat(i.sellingStatus[0].currentPrice[0].__value__))
