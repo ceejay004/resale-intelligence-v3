@@ -1,9 +1,19 @@
 export const config = { runtime: "nodejs" };
 
+// simple in-memory cache
+const cache = {};
+
 export default async function handler(req, res) {
 
-  const item = req.query.item;
+  const item = req.query.item?.toLowerCase();
   if (!item) return res.status(400).json({ error: "No item provided" });
+
+  // 6 hour cache
+  const CACHE_TIME = 1000 * 60 * 60 * 6;
+
+  if (cache[item] && Date.now() - cache[item].time < CACHE_TIME) {
+    return res.json({ ...cache[item].data, cached: true });
+  }
 
   try {
 
@@ -18,14 +28,12 @@ export default async function handler(req, res) {
       "keywords": item,
       "itemFilter(0).name": "SoldItemsOnly",
       "itemFilter(0).value": "true",
-      "paginationInput.entriesPerPage": "25",
+      "paginationInput.entriesPerPage": "20",
       "GLOBAL-ID": "EBAY-GB"
     });
 
     const r = await fetch(url + "?" + params.toString(), {
-      headers: {
-        "X-EBAY-SOA-GLOBAL-ID": "EBAY-GB"
-      }
+      headers: { "X-EBAY-SOA-GLOBAL-ID": "EBAY-GB" }
     });
 
     const data = await r.json();
@@ -34,7 +42,7 @@ export default async function handler(req, res) {
       data.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item || [];
 
     if (!items.length)
-      return res.json({ error: "No sold listings found", debug: data });
+      return res.json({ error: "No sold listings found" });
 
     const prices = items
       .map(i => parseFloat(i.sellingStatus[0].currentPrice[0].__value__))
@@ -42,10 +50,15 @@ export default async function handler(req, res) {
 
     const avg = prices.reduce((a,b)=>a+b,0)/prices.length;
 
-    res.json({
+    const result = {
       average: avg.toFixed(2),
       samples: prices.length
-    });
+    };
+
+    // save cache
+    cache[item] = { data: result, time: Date.now() };
+
+    res.json(result);
 
   } catch (err) {
     res.status(500).json({ error: err.message });
